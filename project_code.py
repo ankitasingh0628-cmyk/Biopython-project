@@ -1,35 +1,33 @@
-from Bio import Entrez, SeqIO  # type: ignore
-from Bio.Blast import NCBIWWW, NCBIXML # type: ignore
-from Bio.Align import PairwiseAligner # type: ignore
+# Ankitashree
+# Central Dogma + GC Content + Pairwise Alignments (Global vs Local) + BLASTn (Top 3 alignments)
+# Using only Nucleotide Accession ID
 
+from Bio import Entrez, SeqIO
+from Bio.Blast import NCBIWWW, NCBIXML
+from Bio.Align import PairwiseAligner
+import urllib.error
 
+# --- Step 1: Setup ---
+Entrez.email = "ankitashree@example.com"   # your email
+acc_id = "NM_001376310"                    # nucleotide accession number
 
-try:
-    import matplotlib.pyplot as plt
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    print("⚠ matplotlib not installed. Skipping visualization step.")
-
-
-Entrez.email = "uttamranjan123@gmail.com"   
-nuc_accession = "NM_001371415"            
-
-
+# --- Step 2: Fetch Nucleotide Sequence ---
 print("\n--- Fetching Nucleotide Sequence ---")
-handle = Entrez.efetch(db="nucleotide", id=nuc_accession, rettype="gb", retmode="text")
+handle = Entrez.efetch(db="nucleotide", id=acc_id, rettype="gb", retmode="text")
 record = SeqIO.read(handle, "genbank")
 handle.close()
 
+seq = record.seq
 print("Accession:", record.id)
 print("Description:", record.description)
+print("Sequence length:", len(seq))
 
+# --- Step 3: GC Content ---
+gc_content = round((seq.count("G") + seq.count("C")) / len(seq) * 100, 2)
+print("\n--- GC Content ---")
+print("GC Content:", gc_content, "%")
 
-seq = record.seq
-gc_content = round((seq.count("G")+seq.count("C"))/len(seq)*100, 2)
-print("Total length:", len(seq))
-print("GC content:", gc_content, "%")
-
+# --- Step 4: Central Dogma (CDS → Protein) ---
 cds_seq, protein = None, None
 for feature in record.features:
     if feature.type == "CDS":
@@ -41,41 +39,54 @@ if cds_seq:
     print("\n--- Central Dogma ---")
     print("CDS length:", len(cds_seq))
     print("Protein length:", len(protein))
-    print("Protein (first 60 aa):", protein[:60])
+    print("Protein (first 30 aa):", protein[:30])
 else:
-    print("No CDS found.")
-    exit()
+    print("No CDS found in record.")
 
+# --- Step 5: Global vs Local Alignment ---
+def show_alignment(seq1, seq2):
+    aligner = PairwiseAligner()
 
-aligner = PairwiseAligner()
-aligner.mode = "global"
-alns = aligner.align(protein, protein)
-print("\n--- Alignment Demo ---")
-print("Alignment score:", alns[0].score)
-print(alns[0])
+    # Global Alignment
+    aligner.mode = "global"
+    global_alignments = aligner.align(seq1, seq2)
+    print("\n=== Global Alignment ===")
+    print(global_alignments[0].format())
+    print("Score:", global_alignments[0].score)
 
+    # Local Alignment
+    aligner.mode = "local"
+    local_alignments = aligner.align(seq1, seq2)
+    print("\n=== Local Alignment ===")
+    print(local_alignments[0].format())
+    print("Score:", local_alignments[0].score)
 
-if MATPLOTLIB_AVAILABLE:
-    bases = ["A","T","G","C"]
-    counts = [seq.count(b) for b in bases]
-    plt.bar(bases, counts, color="skyblue")
-    plt.title("Nucleotide Composition")
-    plt.xlabel("Base")
-    plt.ylabel("Count")
-    plt.savefig("nucleotide_composition.png")
-    plt.close()
-    print("Plot saved as nucleotide_composition.png")
+if cds_seq:
+    # Use first 100 bases to keep output manageable
+    show_alignment(cds_seq[:100], cds_seq.reverse_complement()[:100])
 else:
-    print("Visualization skipped (matplotlib not available).")
+    print("No CDS available for alignment.")
 
+# --- Step 6: BLASTn (CDS vs nucleotide database, Top 3 Alignments) ---
+try:
+    if cds_seq:
+        print("\n--- Running BLASTn (Top 3 Alignments) ---")
+        blastn_handle = NCBIWWW.qblast("blastn", "nt", cds_seq[:200])  # shorter query for demo
+        blastn_record = NCBIXML.read(blastn_handle)
 
-print("\n--- Running BLASTn (CDS vs nt) ---")
-blastn_handle = NCBIWWW.qblast("blastn", "nt", cds_seq)
-blastn_record = NCBIXML.read(blastn_handle)
-print("Top BLASTn hit:", blastn_record.alignments[0].hit_def)
+        print("\nTop 3 BLASTn Hits:")
+        for alignment in blastn_record.alignments[:3]:
+            print(f"\nSequence: {alignment.title}")
+            print(f"Length: {alignment.length}")
+            for hsp in alignment.hsps:
+                print(f"Score: {hsp.score}, E-value: {hsp.expect}")
+                print(f"Query: {hsp.query}")
+                print(f"Match: {hsp.match}")
+                print(f"Subject: {hsp.sbjct}")
+    else:
+        print("No CDS available for BLASTn.")
+except urllib.error.URLError as e:
+    print(f"URL Error: {e.reason}")
+except Exception as e:
+    print(f"An error occurred: {e}")
 
-
-
-print("\n--- Annotations (first 5 features) ---")
-for i, feature in enumerate(record.features[:5]):
-    print(i, feature.type, feature.location)
